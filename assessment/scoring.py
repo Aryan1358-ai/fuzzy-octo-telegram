@@ -43,6 +43,15 @@ def extract_signals_activity_1(response_data):
     if actual_labels == expected:
         triggered.append('correct_full_flow')
 
+    # Check for data pipeline awareness: Database before ML Model
+    if final_positions:
+        labels = [item.get('label', '') for item in final_positions]
+        if 'Database' in labels and 'ML Model' in labels:
+            db_idx = labels.index('Database')
+            ml_idx = labels.index('ML Model')
+            if db_idx < ml_idx:
+                triggered.append('data_flow_awareness')
+
     return triggered
 
 
@@ -142,6 +151,9 @@ def extract_signals_activity_4(response_data):
 
     if 'ML Model' in selected_tiles:
         triggered.append('ml_model_included')
+
+    if 'Message Queue' in selected_tiles:
+        triggered.append('message_queue_selected')
 
     return triggered
 
@@ -281,6 +293,14 @@ def _apply_context_modifiers(session, scores):
     """
     Apply context intake modifiers to scores.
     Prior experience raises thresholds to prevent confirmation bias.
+
+    Design note (§6.5): The 'built_something' penalty applies a uniform
+    0.85× multiplier across ALL domains. This is an accepted limitation
+    because the context intake does not collect domain-specific experience.
+    A uniform reduction preserves relative ranking while tempering absolute
+    scores for experienced users — it cannot push an experienced user toward
+    an unrelated domain. The 'validating' goal modifier further amplifies
+    the user's existing top scores, reinforcing the correct rank order.
     """
     if session.prior_experience == 'built_something':
         # Raise threshold: reduce all scores slightly to prevent early confirmation
@@ -308,8 +328,15 @@ def _apply_context_modifiers(session, scores):
 def apply_validation_multipliers(session):
     """
     Apply validation stage multipliers to existing domain scores.
+
+    Records pre-validation and post-validation snapshots for auditability.
+    Returns the updated DomainScore with a `validation_audit` attribute
+    containing the before/after data.
     """
+    import logging
     from .models import DomainScore, ValidationResponse
+
+    logger = logging.getLogger(__name__)
 
     try:
         domain_score = DomainScore.objects.get(session=session)
@@ -318,6 +345,10 @@ def apply_validation_multipliers(session):
 
     if domain_score.validation_applied:
         return domain_score
+
+    # Snapshot pre-validation scores and ranking
+    pre_validation = domain_score.as_dict()
+    pre_ranked = sorted(pre_validation, key=pre_validation.get, reverse=True)
 
     validations = ValidationResponse.objects.filter(session=session)
 
@@ -335,6 +366,33 @@ def apply_validation_multipliers(session):
         for field in fields:
             current = getattr(domain_score, field, 0)
             setattr(domain_score, field, current * multiplier)
+
+    # Snapshot post-validation scores and ranking
+    post_validation = domain_score.as_dict()
+    post_ranked = sorted(post_validation, key=post_validation.get, reverse=True)
+
+    # Log rank changes for auditability
+    rank_changes = []
+    for domain in DOMAINS:
+        pre_rank = pre_ranked.index(domain) + 1
+        post_rank = post_ranked.index(domain) + 1
+        if pre_rank != post_rank:
+            rank_changes.append(
+                f"{domain}: rank {pre_rank} → {post_rank}"
+            )
+
+    if rank_changes:
+        logger.info(
+            "Validation rank changes for session %s: %s",
+            session.id, "; ".join(rank_changes),
+        )
+
+    # Attach audit data as a transient attribute (not persisted)
+    domain_score._validation_audit = {
+        'pre_validation': pre_validation,
+        'post_validation': post_validation,
+        'rank_changes': rank_changes,
+    }
 
     domain_score.validation_applied = True
     domain_score.save()

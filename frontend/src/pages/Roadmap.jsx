@@ -1,5 +1,8 @@
 /**
  * Roadmap — personalized learning path for a specific domain.
+ *
+ * Phase 14: #1 domain gets deep-dive annotations + evidence.
+ * #2/#3 get general roadmap with a note about personalizing.
  */
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
@@ -108,6 +111,11 @@ export default function Roadmap() {
             className="roadmap-header-accent"
             style={{ background: `linear-gradient(135deg, ${domainColor}30, transparent)` }}
           />
+          {roadmap.is_primary && (
+            <span className="roadmap-personalized-badge" style={{ color: domainColor, borderColor: `${domainColor}40` }}>
+              ✨ Your #1 Domain — Personalized Roadmap
+            </span>
+          )}
           <h1 style={{ color: domainColor }}>{roadmap.title}</h1>
           <p className="roadmap-desc">{roadmap.description}</p>
         </motion.div>
@@ -151,7 +159,7 @@ export default function Roadmap() {
           })}
         </div>
 
-        {/* Gemini Deep-Dive Annotations */}
+        {/* Gemini Deep-Dive Annotations (primary domain only) */}
         {roadmap.annotations && roadmap.annotations.length > 0 && (
           <motion.div
             className="roadmap-annotations glass-card"
@@ -182,6 +190,60 @@ export default function Roadmap() {
                 💡 {note}
               </motion.p>
             ))}
+          </motion.div>
+        )}
+
+        {/* Structured Evidence — key skills from deep dive (primary domain only) */}
+        {roadmap.structured_evidence && (
+          <motion.div
+            className="roadmap-evidence glass-card"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1.8 }}
+          >
+            <h4 style={{ marginBottom: 'var(--space-4)' }}>🔍 What You Shared</h4>
+            <div className="evidence-grid">
+              {roadmap.structured_evidence.technologies?.length > 0 && (
+                <div className="evidence-section">
+                  <span className="evidence-label">Technologies</span>
+                  <div className="evidence-tags">
+                    {roadmap.structured_evidence.technologies.map((t, i) => (
+                      <span key={i} className="evidence-tag" style={{ borderColor: domainColor }}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {roadmap.structured_evidence.projects?.length > 0 && (
+                <div className="evidence-section">
+                  <span className="evidence-label">Projects</span>
+                  <div className="evidence-tags">
+                    {roadmap.structured_evidence.projects.map((p, i) => (
+                      <span key={i} className="evidence-tag">{p}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {roadmap.structured_evidence.strengths?.length > 0 && (
+                <div className="evidence-section">
+                  <span className="evidence-label">Strengths</span>
+                  <div className="evidence-tags">
+                    {roadmap.structured_evidence.strengths.map((s, i) => (
+                      <span key={i} className="evidence-tag" style={{ borderColor: '#10b981' }}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {roadmap.structured_evidence.gaps?.length > 0 && (
+                <div className="evidence-section">
+                  <span className="evidence-label">Areas to Grow</span>
+                  <div className="evidence-tags">
+                    {roadmap.structured_evidence.gaps.map((g, i) => (
+                      <span key={i} className="evidence-tag" style={{ borderColor: '#f59e0b' }}>{g}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
 

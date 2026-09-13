@@ -1,6 +1,8 @@
 /**
- * Results — final domain scores with visualization, thinking styles summary,
- * and links to personalized roadmaps.
+ * Results — Post-deep-dive reveal of top 3 domains.
+ *
+ * §12: Shows only top 3 domains. #1 is "Strongest Match" (personalized),
+ * #2/#3 are "Worth Exploring" (general). Includes insight summary card.
  */
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
@@ -9,31 +11,34 @@ import { assessmentAPI } from '../api/client';
 import './Results.css';
 
 const DOMAIN_META = {
-  backend: { label: 'Backend', icon: '⚙️', color: '#8b5cf6', desc: 'Build the systems behind the interface.' },
-  frontend: { label: 'Frontend', icon: '🎨', color: '#06b6d4', desc: 'Craft experiences people love to use.' },
-  devops: { label: 'DevOps', icon: '🛡️', color: '#10b981', desc: 'Keep systems alive, fast, and reliable.' },
-  data_eng: { label: 'Data Eng', icon: '📊', color: '#f59e0b', desc: 'Build pipelines that turn data into insight.' },
-  ai_ml: { label: 'AI/ML', icon: '🤖', color: '#ec4899', desc: 'Teach machines to learn and decide.' },
-  cybersecurity: { label: 'Cybersecurity', icon: '🔒', color: '#ef4444', desc: 'Protect systems from those who would break them.' },
-  product_eng: { label: 'Product', icon: '🎯', color: '#3b82f6', desc: 'Bridge user needs and engineering decisions.' },
+  backend: { icon: '⚙️', color: '#8b5cf6', desc: 'Build the systems behind the interface.' },
+  frontend: { icon: '🎨', color: '#06b6d4', desc: 'Craft experiences people love to use.' },
+  devops: { icon: '🛡️', color: '#10b981', desc: 'Keep systems alive, fast, and reliable.' },
+  data_eng: { icon: '📊', color: '#f59e0b', desc: 'Build pipelines that turn data into insight.' },
+  ai_ml: { icon: '🤖', color: '#ec4899', desc: 'Teach machines to learn and decide.' },
+  cybersecurity: { icon: '🔒', color: '#ef4444', desc: 'Protect systems from those who would break them.' },
+  product_eng: { icon: '🎯', color: '#3b82f6', desc: 'Bridge user needs and engineering decisions.' },
 };
 
 export default function Results() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [domainScores, setDomainScores] = useState(null);
+  const [topDomains, setTopDomains] = useState([]);
   const [thinkingStyles, setThinkingStyles] = useState([]);
+  const [insightSummary, setInsightSummary] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
     const fetchResults = async () => {
       try {
         const res = await assessmentAPI.getResults();
-        setDomainScores(res.data.domain_scores || null);
+        setTopDomains(res.data.top_domains || []);
         setThinkingStyles(res.data.thinking_styles || []);
+        setInsightSummary(res.data.insight_summary || '');
         setLoading(false);
       } catch (err) {
-        setError('Could not load results. Please complete the assessment first.');
+        const msg = err?.response?.data?.error || 'Could not load results. Please complete the deep dive first.';
+        setError(msg);
         setLoading(false);
       }
     };
@@ -57,22 +62,12 @@ export default function Results() {
     return (
       <div className="results-page results-error">
         <h2>⚠️ {error}</h2>
-        <button className="btn btn-primary" onClick={() => navigate('/')}>
-          Start Over
+        <button className="btn btn-primary" onClick={() => navigate('/deep-dive')}>
+          Start Deep Dive
         </button>
       </div>
     );
   }
-
-  // Build ranked domain list
-  const scoreEntries = domainScores
-    ? Object.entries(domainScores)
-        .filter(([key]) => DOMAIN_META[key])
-        .sort(([, a], [, b]) => b - a)
-    : [];
-
-  const maxScore = scoreEntries.length > 0 ? Math.max(...scoreEntries.map(([, v]) => v), 1) : 1;
-  const totalScore = scoreEntries.reduce((s, [, v]) => s + v, 0) || 1;
 
   return (
     <motion.div
@@ -93,31 +88,32 @@ export default function Results() {
             Your <span className="gradient-text-vibrant">Domain Map</span>
           </h1>
           <p className="results-subtitle">
-            Here's where your natural instincts align across the 7 software engineering domains.
+            Your top 3 engineering domains, ranked by how your instincts aligned during the assessment.
           </p>
         </motion.div>
 
-        {/* Top 3 podium */}
-        {scoreEntries.length >= 3 && (
+        {/* Top 3 Podium */}
+        {topDomains.length >= 3 && (
           <div className="results-podium">
-            {scoreEntries.slice(0, 3).map(([domain, score], i) => {
-              const meta = DOMAIN_META[domain];
-              const pct = Math.round((score / totalScore) * 100);
+            {topDomains.map((d, i) => {
+              const meta = DOMAIN_META[d.domain] || { icon: '💡', color: '#888', desc: '' };
               const heights = ['200px', '160px', '130px'];
               const delays = [0.4, 0.2, 0.6];
 
               return (
                 <motion.div
-                  key={domain}
-                  className={`podium-item podium-${i + 1}`}
+                  key={d.domain}
+                  className={`podium-item podium-${i + 1} ${d.personalized ? 'podium-personalized' : ''}`}
                   initial={{ opacity: 0, y: 60 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.7, delay: delays[i], ease: [0.22, 1, 0.36, 1] }}
                   style={{ order: i === 0 ? 1 : i === 1 ? 0 : 2 }}
                 >
+                  {d.personalized && (
+                    <span className="podium-badge">✨ {d.label}</span>
+                  )}
                   <span className="podium-icon">{meta.icon}</span>
-                  <span className="podium-label">{meta.label}</span>
-                  <span className="podium-pct">{pct}%</span>
+                  <span className="podium-label">{d.display_name}</span>
                   <motion.div
                     className="podium-bar"
                     style={{ background: meta.color }}
@@ -132,48 +128,21 @@ export default function Results() {
           </div>
         )}
 
-        {/* Full score breakdown */}
-        <motion.div
-          className="results-breakdown glass-card"
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1 }}
-        >
-          <h3 style={{ marginBottom: 'var(--space-6)' }}>Full Breakdown</h3>
-          {scoreEntries.map(([domain, score], i) => {
-            const meta = DOMAIN_META[domain];
-            const pct = Math.round((score / totalScore) * 100);
-            return (
-              <motion.div
-                key={domain}
-                className="score-row"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 1 + i * 0.1 }}
-              >
-                <div className="score-row-left">
-                  <span className="score-row-icon">{meta.icon}</span>
-                  <div>
-                    <span className="score-row-label">{meta.label}</span>
-                    <span className="score-row-desc">{meta.desc}</span>
-                  </div>
-                </div>
-                <div className="score-row-right">
-                  <div className="score-bar-track">
-                    <motion.div
-                      className="score-bar-fill"
-                      style={{ background: meta.color }}
-                      initial={{ width: 0 }}
-                      animate={{ width: `${(score / maxScore) * 100}%` }}
-                      transition={{ duration: 0.8, delay: 1.2 + i * 0.1 }}
-                    />
-                  </div>
-                  <span className="score-value">{pct}%</span>
-                </div>
-              </motion.div>
-            );
-          })}
-        </motion.div>
+        {/* Insight Summary Card */}
+        {insightSummary && (
+          <motion.div
+            className="results-insight glass-card"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1 }}
+          >
+            <div className="insight-header">
+              <span className="insight-icon">💡</span>
+              <h3>Your Deep-Dive Insights</h3>
+            </div>
+            <p className="insight-text">{insightSummary}</p>
+          </motion.div>
+        )}
 
         {/* Thinking styles summary */}
         {thinkingStyles.length > 0 && (
@@ -181,7 +150,7 @@ export default function Results() {
             className="results-styles glass-card"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.5 }}
+            transition={{ delay: 1.3 }}
           >
             <h3 style={{ marginBottom: 'var(--space-6)' }}>Your Thinking Styles</h3>
             <div className="styles-mini-grid">
@@ -189,7 +158,7 @@ export default function Results() {
                 <div key={style.style_key} className="style-mini-card">
                   <span className="style-mini-icon">{style.icon || '🧠'}</span>
                   <span className="style-mini-name">
-                    {style.style_key
+                    {style.name || style.style_key
                       .split('_')
                       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
                       .join(' ')
@@ -206,29 +175,30 @@ export default function Results() {
           className="results-roadmaps"
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.8 }}
+          transition={{ delay: 1.6 }}
         >
           <h3 style={{ textAlign: 'center', marginBottom: 'var(--space-6)' }}>
             Explore Your <span className="gradient-text">Roadmaps</span>
           </h3>
           <div className="roadmap-cards">
-            {scoreEntries.slice(0, 3).map(([domain, score], i) => {
-              const meta = DOMAIN_META[domain];
-              const pct = Math.round((score / totalScore) * 100);
+            {topDomains.map((d) => {
+              const meta = DOMAIN_META[d.domain] || { icon: '💡', color: '#888', desc: '' };
               return (
                 <motion.button
-                  key={domain}
-                  className="roadmap-card glass-card"
-                  onClick={() => navigate(`/deep-dive/${domain}`)}
+                  key={d.domain}
+                  className={`roadmap-card glass-card ${d.personalized ? 'roadmap-card-primary' : ''}`}
+                  onClick={() => navigate(`/roadmap/${d.domain}`)}
                   whileHover={{ scale: 1.03, y: -4 }}
                   whileTap={{ scale: 0.98 }}
                 >
                   <span className="roadmap-card-icon">{meta.icon}</span>
-                  <span className="roadmap-card-label">{meta.label}</span>
+                  <span className="roadmap-card-label">{d.display_name}</span>
                   <span className="roadmap-card-match" style={{ color: meta.color }}>
-                    {pct}% match
+                    {d.personalized ? '★ Strongest Match' : 'Worth Exploring'}
                   </span>
-                  <span className="roadmap-card-cta">View Roadmap →</span>
+                  <span className="roadmap-card-cta">
+                    {d.personalized ? 'View Personalized Roadmap →' : 'View Roadmap →'}
+                  </span>
                 </motion.button>
               );
             })}
@@ -240,7 +210,7 @@ export default function Results() {
           className="results-footer"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 2.2 }}
+          transition={{ delay: 2 }}
         >
           <button
             className="btn btn-secondary"

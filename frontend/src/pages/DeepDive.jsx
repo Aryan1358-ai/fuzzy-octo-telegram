@@ -1,9 +1,9 @@
 /**
  * DeepDive — Gemini-powered conversational deep-dive chat.
  *
- * Triggers when a user clicks "View Roadmap" from the Results page.
- * Conducts a 3–4 turn AI-led conversation grounded in behavioral data,
- * then navigates to the personalized roadmap.
+ * §8: The domain is fetched from the backend (session.primary_domain),
+ * NOT from the URL. This ensures the user always deep-dives into their
+ * backend-ranked #1 domain.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -24,13 +24,12 @@ const DOMAIN_META = {
 const MAX_WORDS = 60;
 
 export default function DeepDive() {
-  const { domain } = useParams();
+  const { domain: urlDomain } = useParams(); // optional fallback
   const navigate = useNavigate();
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
-  const meta = DOMAIN_META[domain] || { label: domain, icon: '💬', color: '#8b5cf6' };
-
+  const [domain, setDomain] = useState(urlDomain || null);
   const [messages, setMessages] = useState([]);
   const [chatStatus, setChatStatus] = useState('loading'); // loading | chatting | completed | error
   const [isTyping, setIsTyping] = useState(false);
@@ -40,6 +39,7 @@ export default function DeepDive() {
   const [userTurnCount, setUserTurnCount] = useState(0);
   const [error, setError] = useState(null);
 
+  const meta = DOMAIN_META[domain] || { label: domain || 'Loading…', icon: '💬', color: '#8b5cf6' };
   const wordCount = inputValue.trim() ? inputValue.trim().split(/\s+/).length : 0;
 
   // ── Auto-scroll to latest message ──
@@ -51,12 +51,26 @@ export default function DeepDive() {
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
 
-  // ── Start deep dive on mount ──
+  // ── Fetch domain from backend, then start deep dive ──
   useEffect(() => {
-    const startChat = async () => {
+    const initDeepDive = async () => {
       try {
-        const res = await deepDiveAPI.start(domain);
+        // §8: Always fetch the backend-owned domain
+        let resolvedDomain = urlDomain;
+        if (!resolvedDomain) {
+          const domainRes = await deepDiveAPI.getDomain();
+          resolvedDomain = domainRes.data.domain;
+        }
+        setDomain(resolvedDomain);
+
+        // Start the deep dive chat
+        const res = await deepDiveAPI.start(resolvedDomain);
         const chat = res.data.chat;
+
+        // Use the domain returned by the server (may differ from URL param)
+        if (res.data.domain) {
+          setDomain(res.data.domain);
+        }
 
         setMessages(chat.transcript || []);
         setAiTurnCount(chat.ai_turn_count || 0);
@@ -84,12 +98,12 @@ export default function DeepDive() {
         setChatStatus('error');
       }
     };
-    startChat();
-  }, [domain]);
+    initDeepDive();
+  }, [urlDomain]);
 
   // ── Send user message ──
   const handleSend = async () => {
-    if (!inputValue.trim() || wordCount > MAX_WORDS || isSending) return;
+    if (!inputValue.trim() || wordCount > MAX_WORDS || isSending || !domain) return;
 
     const content = inputValue.trim();
     setInputValue('');
@@ -134,7 +148,7 @@ export default function DeepDive() {
   // ── Skip deep dive ──
   const handleSkip = async () => {
     try {
-      await deepDiveAPI.skip(domain);
+      if (domain) await deepDiveAPI.skip(domain);
     } catch {
       // Skip silently
     }
@@ -185,8 +199,8 @@ export default function DeepDive() {
     return (
       <div className="deep-dive-page deep-dive-error">
         <h2>⚠️ {error}</h2>
-        <button className="btn btn-primary" onClick={() => navigate('/results')}>
-          Back to Results
+        <button className="btn btn-primary" onClick={() => navigate('/thinking-styles')}>
+          Back to Thinking Styles
         </button>
       </div>
     );

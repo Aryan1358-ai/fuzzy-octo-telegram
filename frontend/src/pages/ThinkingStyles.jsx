@@ -1,6 +1,9 @@
 /**
  * Thinking Styles — dramatic reveal of 3-4 matched thinking styles
  * after completing all 6 activities.
+ *
+ * §7: No domain information is shown here. Domains are hidden until
+ * after the deep-dive completes.
  */
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,31 +11,10 @@ import { useNavigate } from 'react-router-dom';
 import { assessmentAPI } from '../api/client';
 import './ThinkingStyles.css';
 
-const DOMAIN_LABELS = {
-  backend: 'Backend',
-  frontend: 'Frontend',
-  devops: 'DevOps',
-  data_eng: 'Data Engineering',
-  ai_ml: 'AI/ML',
-  cybersecurity: 'Cybersecurity',
-  product_eng: 'Product Engineering',
-};
-
-const DOMAIN_COLORS = {
-  backend: '#8b5cf6',
-  frontend: '#06b6d4',
-  devops: '#10b981',
-  data_eng: '#f59e0b',
-  ai_ml: '#ec4899',
-  cybersecurity: '#ef4444',
-  product_eng: '#3b82f6',
-};
-
 export default function ThinkingStyles() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [styles, setStyles] = useState([]);
-  const [domainScores, setDomainScores] = useState(null);
   const [revealed, setRevealed] = useState(false);
   const [showIndex, setShowIndex] = useState(-1);
   const navigate = useNavigate();
@@ -42,7 +24,6 @@ export default function ThinkingStyles() {
       try {
         const res = await assessmentAPI.getThinkingStyles();
         setStyles(res.data.thinking_styles || []);
-        setDomainScores(res.data.domain_scores || null);
         setLoading(false);
 
         // Start reveal sequence after brief pause
@@ -140,7 +121,7 @@ export default function ThinkingStyles() {
                   <div className="ts-card-rank">#{i + 1}</div>
                   <div className="ts-card-icon">{style.icon || '🧠'}</div>
                   <h3 className="ts-card-name">
-                    {style.style_key
+                    {style.name || style.style_key
                       .split('_')
                       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
                       .join(' ')
@@ -163,70 +144,13 @@ export default function ThinkingStyles() {
                       />
                     </div>
                   </div>
-
-                  {/* Primary domains */}
-                  {style.primary_domains && style.primary_domains.length > 0 && (
-                    <div className="ts-domains">
-                      {style.primary_domains.map((d) => (
-                        <span
-                          key={d}
-                          className="ts-domain-tag"
-                          style={{ borderColor: DOMAIN_COLORS[d] || '#666', color: DOMAIN_COLORS[d] || '#999' }}
-                        >
-                          {DOMAIN_LABELS[d] || d}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </motion.div>
               )
             ))}
           </AnimatePresence>
         </div>
 
-        {/* Domain scores preview */}
-        {domainScores && showIndex >= styles.length - 1 && (
-          <motion.div
-            className="ts-scores-preview glass-card"
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.3 }}
-          >
-            <h3 style={{ marginBottom: 'var(--space-6)', textAlign: 'center' }}>
-              Domain Signals <span className="gradient-text">Preview</span>
-            </h3>
-            <div className="ts-score-bars">
-              {Object.entries(domainScores)
-                .filter(([key]) => key !== 'id' && key !== 'session' && key !== 'validation_applied' && key !== 'updated_at')
-                .sort(([, a], [, b]) => b - a)
-                .map(([domain, score], i) => {
-                  const maxScore = Math.max(
-                    ...Object.entries(domainScores)
-                      .filter(([k]) => k !== 'id' && k !== 'session' && k !== 'validation_applied' && k !== 'updated_at')
-                      .map(([, v]) => v),
-                    1
-                  );
-                  return (
-                    <div key={domain} className="ts-score-row">
-                      <span className="ts-score-label">{DOMAIN_LABELS[domain] || domain}</span>
-                      <div className="ts-score-track">
-                        <motion.div
-                          className="ts-score-fill"
-                          style={{ background: DOMAIN_COLORS[domain] || '#666' }}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${(score / maxScore) * 100}%` }}
-                          transition={{ duration: 0.8, delay: 0.1 * i }}
-                        />
-                      </div>
-                      <span className="ts-score-value">{Math.round(score * 10) / 10}</span>
-                    </div>
-                  );
-                })}
-            </div>
-          </motion.div>
-        )}
-
-        {/* CTA */}
+        {/* CTA — points to deep dive, not results */}
         {showIndex >= styles.length - 1 && (
           <motion.div
             className="ts-cta"
@@ -234,11 +158,14 @@ export default function ThinkingStyles() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
           >
+            <p className="ts-cta-hint">
+              Ready to go deeper? A short conversation will personalize your results.
+            </p>
             <button
               className="btn btn-primary btn-lg"
-              onClick={() => navigate('/results')}
+              onClick={() => navigate('/deep-dive')}
             >
-              See Full Results →
+              Start Deep Dive →
             </button>
           </motion.div>
         )}

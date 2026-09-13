@@ -145,7 +145,7 @@ def _build_system_prompt(session, domain, behavioral_ctx):
     return f"""You are MYM, the career exploration assistant for MakeYourMove — a platform that helps students discover their ideal software engineering specialisation.
 
 ## YOUR ROLE
-You are conducting a short, warm Conversational Deep-Dive with a student who just completed a behavioural assessment. The conversation is about the "{domain_label}" domain. Your goal is to surface qualitative insight into the student's thinking process so the platform can personalise their learning roadmap.
+You are conducting a short, warm Conversational Deep-Dive with a student who just completed a behavioural assessment. The conversation is about the "{domain_label}" domain. Your goal is to **gather concrete evidence** about the student's experience, motivations, and skills so the platform can personalise their learning roadmap.
 
 ## THE STUDENT'S BEHAVIORAL PROFILE
 Their top thinking style is "{style_name}" — {style_desc}
@@ -153,16 +153,26 @@ Their top thinking style is "{style_name}" — {style_desc}
 During the assessment, the student:
 {signals_text if signals_text else '  • (no specific signals recorded)'}
 
-## CONVERSATION STRUCTURE — 3-STEP FUNNEL
+## CONVERSATION STRUCTURE — EVIDENCE-GATHERING FUNNEL
 Follow this exact structure. You output ONE message per turn.
 
 Turn 0 (Opening): Reference a specific behavioral moment from above. Ask a broad, low-pressure question to get a personal narrative. Example pattern: "You [specific thing they did]… Have you ever done something like that for real?"
 
-Turn 1 (Follow-up 1 — Narrowing): Pick a specific detail from the student's story. Ask about their concrete role or action. Keep it short (~2 sentences).
+Turn 1 (Follow-up 1 — Narrowing): Pick a specific detail from the student's story. Ask about their concrete role or action. Look for: projects, technologies used, team dynamics.
 
-Turn 2 (Follow-up 2 — Motivation): Ask about the underlying "why." What drew them to that approach? What did they enjoy or find frustrating?
+Turn 2 (Follow-up 2 — Motivation): Ask about the underlying "why." What drew them to that approach? What did they enjoy or find frustrating? Look for: intrinsic motivations, strengths, gaps.
 
-Turn 3 (Conditional — Disambiguation): ONLY ask this if, after Turn 2, you genuinely cannot tell whether the student is interested in {domain_label} out of personal passion or external necessity. Otherwise, DO NOT use Turn 3 — end the conversation with a warm wrap-up line instead.
+Turn 3 (Conditional — only if needed): ONLY ask this if the student's first two replies were vague (<15 words average) or you genuinely cannot distinguish passion from external motivation. Otherwise, wrap up warmly. Most conversations should END after Turn 2.
+
+## EVIDENCE YOU ARE GATHERING
+Try to naturally elicit:
+- **Projects**: What the student has built or worked on
+- **Technologies**: Specific tools, languages, frameworks mentioned
+- **Responsibilities**: Their role in teams or projects
+- **Problems solved**: Specific challenges they tackled
+- **Motivations**: Why they are drawn to this area
+- **Strengths**: What they're good at based on their own assessment
+- **Gaps**: Areas they want to learn or feel unsure about
 
 ## RULES (CRITICAL)
 1. Keep every response to ≤ 2 sentences. Be concise and conversational.
@@ -384,3 +394,145 @@ def generate_roadmap_annotations(session, domain, transcript):
         logger.error(f"Gemini annotation generation failed: {e}")
 
     return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Early termination heuristic (§9 / Phase 11)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def has_sufficient_evidence(transcript):
+    """
+    Heuristic: after Turn 2 (3 user responses), check if the user has
+    provided enough detail to skip Turn 3.
+
+    Criteria: all user responses average >15 words and at least 2 are
+    classified as 'substantive'.
+    """
+    user_messages = [m for m in transcript if m['role'] == 'user']
+    if len(user_messages) < 2:
+        return False
+
+    word_counts = [len(m['content'].split()) for m in user_messages]
+    avg_words = sum(word_counts) / len(word_counts)
+
+    substantive_count = sum(
+        1 for m in user_messages
+        if classify_reply(m['content']) == 'substantive'
+    )
+
+    return avg_words > 15 and substantive_count >= 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Structured Evidence Extraction (§10 / Phase 12)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def extract_structured_evidence(transcript):
+    """
+    Prompt Gemini to extract structured evidence fields from the conversation.
+
+    Returns a dict with keys: projects, technologies, responsibilities,
+    problems_solved, motivations, strengths, gaps. Each is a list of strings
+    (empty list if not mentioned).
+    """
+    transcript_text = '\n'.join(
+        f"{'MYM' if m['role'] == 'ai' else 'Student'}: {m['content']}"
+        for m in transcript
+    )
+
+    prompt = (
+        f"Below is a conversation between a career exploration assistant (MYM) "
+        f"and a student.\n\n"
+        f"---\n{transcript_text}\n---\n\n"
+        f"Extract structured evidence from what the STUDENT said (not MYM). "
+        f"Return a JSON object with exactly these keys, each mapping to a list of "
+        f"short strings (empty list if not mentioned):\n\n"
+        f'{{\n'
+        f'  "projects": [],\n'
+        f'  "technologies": [],\n'
+        f'  "responsibilities": [],\n'
+        f'  "problems_solved": [],\n'
+        f'  "motivations": [],\n'
+        f'  "strengths": [],\n'
+        f'  "gaps": []\n'
+        f'}}\n\n'
+        f"Return ONLY the JSON object, no other text."
+    )
+
+    empty = {
+        'projects': [], 'technologies': [], 'responsibilities': [],
+        'problems_solved': [], 'motivations': [], 'strengths': [], 'gaps': [],
+    }
+
+    try:
+        client = _get_client()
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=400,
+            ),
+        )
+        text = response.text.strip()
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        result = json.loads(text)
+        if isinstance(result, dict):
+            # Ensure all expected keys exist
+            for key in empty:
+                if key not in result:
+                    result[key] = []
+            return result
+    except Exception as e:
+        logger.error(f"Gemini evidence extraction failed: {e}")
+
+    return empty
+
+
+def generate_insight_summary(domain, evidence, transcript):
+    """
+    Generate a concise insight summary that separates user-stated info
+    from assessment observations.
+
+    Returns a string summary. Persisted to DeepDiveChat.insight_summary.
+    """
+    domain_label = DOMAIN_LABELS.get(domain, domain)
+
+    transcript_text = '\n'.join(
+        f"{'MYM' if m['role'] == 'ai' else 'Student'}: {m['content']}"
+        for m in transcript
+    )
+
+    evidence_summary = json.dumps(evidence, indent=2) if evidence else '{}'
+
+    prompt = (
+        f"You are summarising a deep-dive conversation about {domain_label}.\n\n"
+        f"Conversation:\n{transcript_text}\n\n"
+        f"Extracted evidence:\n{evidence_summary}\n\n"
+        f"Write a concise 3–4 sentence summary in two parts:\n"
+        f"1. **What you told us**: Key things the student explicitly shared "
+        f"(projects, technologies, interests).\n"
+        f"2. **What we observed**: Patterns from their assessment behavior "
+        f"that align with or complement what they said.\n\n"
+        f"Write in second person ('you'). Be warm and specific. "
+        f"Do NOT use bullet points — write flowing sentences."
+    )
+
+    try:
+        client = _get_client()
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.6,
+                max_output_tokens=250,
+            ),
+        )
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Gemini insight summary failed: {e}")
+
+    return ''

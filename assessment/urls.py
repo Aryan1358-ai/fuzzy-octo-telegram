@@ -38,6 +38,7 @@ urlpatterns = [
     path('roadmap/<str:domain>/', views.get_roadmap, name='roadmap'),
 
     # Deep-Dive Chat
+    path('deep-dive/domain/', views.get_deep_dive_domain, name='deep-dive-domain'),
     path('deep-dive/<str:domain>/start/', views.start_deep_dive, name='start-deep-dive'),
     path('deep-dive/<str:domain>/message/', views.send_deep_dive_message, name='deep-dive-message'),
     path('deep-dive/<str:domain>/skip/', views.skip_deep_dive, name='skip-deep-dive'),

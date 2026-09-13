@@ -27,11 +27,13 @@ from .signals_config import THINKING_STYLE_DOMAINS
 from .deep_dive import (
     generate_opening_line, generate_follow_up,
     classify_reply, get_wrap_up_line, generate_roadmap_annotations,
+    has_sufficient_evidence, extract_structured_evidence,
+    generate_insight_summary,
 )
 
 
 def _get_or_create_session(request):
-    """Get existing session for the authenticated user."""
+    """Get existing session for the authenticated user, or create one."""
     # First try session ID from Django session store
     session_id = request.session.get('assessment_session_id')
     if session_id:
@@ -46,6 +48,14 @@ def _get_or_create_session(request):
         if session:
             request.session['assessment_session_id'] = str(session.id)
             return session
+            
+        # Create a new session if none exists
+        session = AssessmentSession.objects.create(
+            user=request.user,
+            session_key=request.session.session_key or '',
+        )
+        request.session['assessment_session_id'] = str(session.id)
+        return session
 
     return None
 
@@ -158,11 +168,18 @@ def submit_activity(request, activity_number):
         }
     )
 
-    # Calculate scores for this activity
+    # Calculate scores and extract behavioral signals for this activity
     score_deltas, triggered_signals = calculate_activity_scores(
         activity_number,
         serializer.validated_data['response_data'],
     )
+
+    # Persist derived behavioral signals back to the activity response
+    activity_response.behavioral_signals = {
+        'triggered_signals': triggered_signals,
+        'score_deltas': score_deltas,
+    }
+    activity_response.save(update_fields=['behavioral_signals'])
 
     # Update current activity tracker
     completed_count = ActivityResponse.objects.filter(session=session).count()
@@ -175,8 +192,6 @@ def submit_activity(request, activity_number):
 
     return Response({
         'message': f'Activity {activity_number} response saved.',
-        'signals_triggered': triggered_signals,
-        'score_deltas': score_deltas,
         'activities_completed': completed_count,
         'next_stage': session.current_stage,
     })
@@ -196,19 +211,32 @@ def get_thinking_styles(request):
     # Calculate thinking styles
     styles = save_thinking_styles(session, domain_score.as_dict())
 
-    # Enrich with config data
+    # Enrich with config data (only non-domain fields)
     for style in styles:
         config = THINKING_STYLE_DOMAINS.get(style['style_key'], {})
         style['icon'] = config.get('icon', '')
-        style['primary_domains'] = config.get('primary_domains', [])
+        # Intentionally NOT including primary_domains — domains are hidden from user (§7)
 
+    # §8: Lock backend-owned domain selection on the session
+    ranked = domain_score.get_ranked_domains()
+    session.primary_domain = ranked[0]['domain'] if ranked else ''
+    session.top_three_domains = [r['domain'] for r in ranked[:3]]
     session.current_stage = 'validation'
     session.save()
 
     return Response({
-        'thinking_styles': styles,
-        'domain_scores': DomainScoreSerializer(domain_score).data,
-        'signals_log': all_signals,
+        'thinking_styles': [
+            {
+                'style_key': s['style_key'],
+                'name': s['name'],
+                'confidence': s['confidence'],
+                'icon': s['icon'],
+                'description': s['description'],
+                'rank': s['rank'],
+            }
+            for s in styles
+        ],
+        'next_step': 'deep-dive',
     })
 
 
@@ -244,10 +272,21 @@ def submit_validation(request, domain):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_results(request):
-    """Get final domain results with validation multipliers applied."""
+    """Get final domain results — only available after deep dive completes.
+
+    §12: Returns only top 3 domains. Rank #1 is labeled 'Strongest Match'
+    with personalized=True, ranks #2/#3 are labeled 'Worth Exploring'.
+    """
     session = _get_or_create_session(request)
     if not session:
         return Response({'error': 'No active session.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # §13: Gate behind deep_dive_completed
+    if not session.deep_dive_completed:
+        return Response(
+            {'error': 'Complete the deep dive first.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     # Ensure scores are calculated
     domain_score, _ = calculate_pre_assessment_scores(session)
@@ -257,23 +296,64 @@ def get_results(request):
     if not domain_score:
         return Response({'error': 'No scores available.'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Get thinking styles
-    styles = ThinkingStyle.objects.filter(session=session)
-    style_data = ThinkingStyleSerializer(styles, many=True).data
+    # Get top 3 domains from session (locked after scoring)
+    top_three = session.top_three_domains or []
+    if not top_three:
+        ranked = domain_score.get_ranked_domains()
+        top_three = [r['domain'] for r in ranked[:3]]
 
-    # Enrich styles with config
-    for style in style_data:
-        config = THINKING_STYLE_DOMAINS.get(style['style_key'], {})
-        style['icon'] = config.get('icon', '')
-        style['primary_domains'] = config.get('primary_domains', [])
+    DOMAIN_LABELS = {
+        'backend': 'Backend Engineering',
+        'frontend': 'Frontend Engineering',
+        'devops': 'DevOps Engineering',
+        'data_eng': 'Data Engineering',
+        'ai_ml': 'AI/ML Engineering',
+        'cybersecurity': 'Cybersecurity',
+        'product_eng': 'Product Engineering',
+    }
+
+    top_domains = []
+    for i, domain_key in enumerate(top_three[:3]):
+        top_domains.append({
+            'rank': i + 1,
+            'domain': domain_key,
+            'label': 'Your Strongest Match' if i == 0 else 'Worth Exploring',
+            'display_name': DOMAIN_LABELS.get(domain_key, domain_key),
+            'personalized': i == 0,
+        })
+
+    # Get thinking styles (without domain info)
+    styles = ThinkingStyle.objects.filter(session=session)
+    style_data = []
+    for style in styles:
+        config = THINKING_STYLE_DOMAINS.get(style.style_key, {})
+        style_data.append({
+            'style_key': style.style_key,
+            'name': config.get('name', style.style_key),
+            'confidence': style.confidence,
+            'icon': config.get('icon', ''),
+            'description': style.description,
+            'rank': style.rank,
+        })
+
+    # Get insight summary from deep dive
+    insight_summary = ''
+    try:
+        chat = DeepDiveChat.objects.get(
+            session=session,
+            domain=session.primary_domain,
+        )
+        insight_summary = chat.insight_summary or ''
+    except DeepDiveChat.DoesNotExist:
+        pass
 
     session.current_stage = 'results'
     session.save()
 
     return Response({
-        'domain_scores': DomainScoreSerializer(domain_score).data,
+        'top_domains': top_domains,
         'thinking_styles': style_data,
-        'session': AssessmentSessionSerializer(session).data,
+        'insight_summary': insight_summary,
     })
 
 
@@ -377,20 +457,31 @@ def get_roadmap(request, domain):
     if not roadmap:
         return Response({'error': f'Unknown domain: {domain}'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Include deep-dive annotations if chat was completed
+    # Phase 14: Check if this domain is the user's #1 (personalized) or #2/#3 (general)
+    is_primary = session.primary_domain == domain if session else False
     annotations = []
+    structured_evidence = {}
+
     if session:
         try:
             chat = DeepDiveChat.objects.get(session=session, domain=domain, status='completed')
             annotations = chat.roadmap_annotations or []
+            if is_primary:
+                structured_evidence = chat.structured_evidence or {}
         except DeepDiveChat.DoesNotExist:
             pass
 
-    roadmap['annotations'] = annotations
+    roadmap['annotations'] = annotations if is_primary else []
+    roadmap['is_primary'] = is_primary
     roadmap['ai_notes'] = (
-        annotations[0] if annotations
-        else f'Personalized notes for {domain} will appear here when AI integration is enabled.'
+        annotations[0] if annotations and is_primary
+        else f'Complete the deep dive in your #1 domain to unlock personalized notes here.'
+        if not is_primary
+        else ''
     )
+
+    if is_primary and structured_evidence:
+        roadmap['structured_evidence'] = structured_evidence
 
     return Response(roadmap)
 
@@ -423,18 +514,50 @@ MAX_AI_TURNS = 4
 MAX_USER_TURNS = 4
 
 
-@api_view(['POST'])
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def start_deep_dive(request, domain):
-    """Start (or resume) a conversational deep-dive for a domain."""
+def get_deep_dive_domain(request):
+    """Return the backend-selected primary domain for the deep dive."""
     session = _get_or_create_session(request)
     if not session:
         return Response({'error': 'No active session.'}, status=status.HTTP_404_NOT_FOUND)
 
+    if not session.primary_domain:
+        return Response(
+            {'error': 'Primary domain not set. Complete activities and view thinking styles first.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response({
+        'domain': session.primary_domain,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def start_deep_dive(request, domain):
+    """Start (or resume) a conversational deep-dive for a domain.
+
+    §8: The URL `domain` param is accepted for routing compatibility but
+    the actual domain used is always `session.primary_domain`, which was
+    locked by the backend after scoring.
+    """
+    session = _get_or_create_session(request)
+    if not session:
+        return Response({'error': 'No active session.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # §8: Force backend-selected domain, ignore URL param
+    forced_domain = session.primary_domain
+    if not forced_domain:
+        return Response(
+            {'error': 'Primary domain not set. Complete activities first.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     # Check if a chat already exists for this domain
     chat, created = DeepDiveChat.objects.get_or_create(
         session=session,
-        domain=domain,
+        domain=forced_domain,
         defaults={'status': 'in_progress'},
     )
 
@@ -446,7 +569,7 @@ def start_deep_dive(request, domain):
         })
 
     # Generate opening line via Gemini
-    opening = generate_opening_line(session, domain)
+    opening = generate_opening_line(session, forced_domain)
 
     chat.transcript = [{'role': 'ai', 'content': opening, 'turn': 0}]
     chat.ai_turn_count = 1
@@ -455,6 +578,7 @@ def start_deep_dive(request, domain):
     return Response({
         'chat': DeepDiveChatSerializer(chat).data,
         'message': 'Deep-dive started.',
+        'domain': forced_domain,
     }, status=status.HTTP_201_CREATED)
 
 
@@ -550,19 +674,45 @@ def send_deep_dive_message(request, domain):
             })
         # else: first low-effort, Gemini will probe gently via system prompt
 
+    # ── Helper: complete a deep-dive chat with evidence extraction ──
+    def _complete_chat(chat, session, domain):
+        """Run evidence extraction, insight summary, annotations, and mark complete."""
+        annotations = generate_roadmap_annotations(session, domain, chat.transcript)
+        evidence = extract_structured_evidence(chat.transcript)
+        insight = generate_insight_summary(domain, evidence, chat.transcript)
+
+        chat.roadmap_annotations = annotations
+        chat.structured_evidence = evidence
+        chat.insight_summary = insight
+        chat.status = 'completed'
+        chat.save()
+
+        # Mark session deep dive as completed
+        session.deep_dive_completed = True
+        session.save(update_fields=['deep_dive_completed'])
+
     # ── Check turn limits ──
     if chat.ai_turn_count >= MAX_AI_TURNS or chat.user_turn_count >= MAX_USER_TURNS:
-        # Generate annotations and wrap up
-        annotations = generate_roadmap_annotations(session, domain, chat.transcript)
         wrap_up = get_wrap_up_line('completed')
         chat.transcript.append({'role': 'ai', 'content': wrap_up, 'turn': chat.ai_turn_count})
         chat.ai_turn_count += 1
-        chat.roadmap_annotations = annotations
-        chat.status = 'completed'
-        chat.save()
+        _complete_chat(chat, session, domain)
         return Response({
             'chat': DeepDiveChatSerializer(chat).data,
             'message': 'Conversation completed.',
+            'insight_summary': chat.insight_summary,
+        })
+
+    # ── Phase 11: Early termination after Turn 2 if evidence is sufficient ──
+    if chat.ai_turn_count >= 3 and has_sufficient_evidence(chat.transcript):
+        wrap_up = get_wrap_up_line('completed')
+        chat.transcript.append({'role': 'ai', 'content': wrap_up, 'turn': chat.ai_turn_count})
+        chat.ai_turn_count += 1
+        _complete_chat(chat, session, domain)
+        return Response({
+            'chat': DeepDiveChatSerializer(chat).data,
+            'message': 'Conversation completed.',
+            'insight_summary': chat.insight_summary,
         })
 
     # ── Generate follow-up via Gemini ──
@@ -574,15 +724,18 @@ def send_deep_dive_message(request, domain):
 
     # Check if this was the last AI turn
     if chat.ai_turn_count >= MAX_AI_TURNS:
-        annotations = generate_roadmap_annotations(session, domain, chat.transcript)
-        chat.roadmap_annotations = annotations
-        chat.status = 'completed'
+        _complete_chat(chat, session, domain)
+        return Response({
+            'chat': DeepDiveChatSerializer(chat).data,
+            'message': 'Conversation completed.',
+            'insight_summary': chat.insight_summary,
+        })
 
     chat.save()
 
     return Response({
         'chat': DeepDiveChatSerializer(chat).data,
-        'message': 'Follow-up generated.' if chat.status == 'in_progress' else 'Conversation completed.',
+        'message': 'Follow-up generated.',
     })
 
 
@@ -603,6 +756,10 @@ def skip_deep_dive(request, domain):
     if not created:
         chat.status = 'skipped'
         chat.save()
+
+    # Mark deep dive as completed even when skipped
+    session.deep_dive_completed = True
+    session.save(update_fields=['deep_dive_completed'])
 
     wrap_up = get_wrap_up_line('skipped')
 

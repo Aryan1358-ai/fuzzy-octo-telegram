@@ -213,3 +213,54 @@
     height: 16px;
   }
 }
+
+/* ─── Personalized Badge ──────────────────────────────────────────── */
+.roadmap-personalized-badge {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  padding: 4px 14px;
+  border: 1px solid;
+  border-radius: var(--radius-full);
+  margin-bottom: var(--space-4);
+}
+
+/* ─── Evidence Grid ───────────────────────────────────────────────── */
+.roadmap-evidence {
+  margin-bottom: var(--space-8);
+}
+
+.evidence-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.evidence-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.evidence-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.evidence-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.evidence-tag {
+  font-size: var(--font-size-xs);
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+}

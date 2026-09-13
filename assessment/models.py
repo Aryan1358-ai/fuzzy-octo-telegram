@@ -32,6 +32,13 @@ class AssessmentSession(models.Model):
     prior_experience = models.CharField(max_length=20, blank=True, default='')
     goal = models.CharField(max_length=20, blank=True, default='')
 
+    # Backend-owned domain selection (set after scoring, hidden from client)
+    primary_domain = models.CharField(max_length=20, blank=True, null=True,
+        help_text="Internally ranked #1 domain, set after scoring")
+    top_three_domains = models.JSONField(default=list, blank=True,
+        help_text="Ranked top 3 domain keys, hidden until deep dive completes")
+    deep_dive_completed = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -109,15 +116,20 @@ class DomainScore(models.Model):
         }
 
     def get_ranked_domains(self):
-        """Return domains sorted by score descending."""
+        """Return domains sorted by normalized score descending."""
+        from .signals_config import DOMAIN_THEORETICAL_MAX
         scores = self.as_dict()
-        total = sum(scores.values()) or 1
-        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        ranked = sorted(
+            scores.items(),
+            key=lambda x: x[1] / DOMAIN_THEORETICAL_MAX.get(x[0], 1),
+            reverse=True,
+        )
         return [
             {
                 'domain': domain,
-                'score': score,
-                'percentage': round((score / total) * 100, 1),
+                'raw_score': round(score, 2),
+                'normalized_score': round(score / DOMAIN_THEORETICAL_MAX.get(domain, 1), 3),
+                'percentage': round((score / DOMAIN_THEORETICAL_MAX.get(domain, 1)) * 100, 1),
             }
             for domain, score in ranked
         ]
@@ -221,6 +233,12 @@ class DeepDiveChat(models.Model):
 
     # Gemini-generated annotations for roadmap enrichment
     roadmap_annotations = models.JSONField(default=list, help_text="Personalized roadmap annotation strings")
+
+    # Structured evidence extracted from the conversation (Phase 12)
+    structured_evidence = models.JSONField(default=dict, blank=True,
+        help_text="Extracted evidence: projects, technologies, responsibilities, etc.")
+    insight_summary = models.TextField(blank=True, default='',
+        help_text="AI-generated user insight summary, persisted for refresh")
 
     ai_turn_count = models.IntegerField(default=0)
     user_turn_count = models.IntegerField(default=0)

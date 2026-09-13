@@ -70,6 +70,7 @@ export default function Activity1SystemFlow({ activityNumber, title }) {
     [...INITIAL_BLOCKS].sort(() => Math.random() - 0.5)
   );
   const placementOrder = useRef([]);
+  const startTime = useRef(Date.now());
   const { submit, submitting, submitted, error } = useActivitySubmit(activityNumber);
 
   const sensors = useSensors(
@@ -104,7 +105,7 @@ export default function Activity1SystemFlow({ activityNumber, title }) {
         placement_order: placementOrder.current,
         final_positions: blocks.map((b) => ({ label: b.label })),
       },
-      duration_ms: Date.now() - (placementOrder.current[0]?.timestamp || Date.now()),
+      duration_ms: Date.now() - startTime.current,
     });
   };
 

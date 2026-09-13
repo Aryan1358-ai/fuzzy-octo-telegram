@@ -15,11 +15,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # Quick-start development settings - unsuitable for production
-SECRET_KEY = 'django-insecure-wjm+*j(7k7)jow03@(3)&*lbe$p-mx*mdfbzb#k3ttbvg!$nmy'
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-wjm+*j(7k7)jow03@(3)&*lbe$p-mx*mdfbzb#k3ttbvg!$nmy',
+)
 
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
 
 
 # Application definition
@@ -118,8 +121,10 @@ REST_FRAMEWORK = {
 }
 
 
-# CORS settings (allow React dev server)
+# CORS settings — dynamic from FRONTEND_URL env var
+_FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
 CORS_ALLOWED_ORIGINS = [
+    _FRONTEND_URL,
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ]
@@ -128,16 +133,20 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Session settings
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
-SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'Lax' if DEBUG else 'None'
 SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = not DEBUG
 
 # CSRF settings for cross-origin React requests
 CSRF_TRUSTED_ORIGINS = [
+    _FRONTEND_URL,
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ]
+CSRF_COOKIE_SAMESITE = 'Lax' if DEBUG else 'None'
+CSRF_COOKIE_SECURE = not DEBUG
 
 
 # Google Gemini API (Conversational Deep-Dive)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-GEMINI_MODEL = 'gemini-2.0-flash'
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')

@@ -4,7 +4,7 @@
  */
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -65,6 +65,7 @@ export const assessmentAPI = {
 };
 
 export const deepDiveAPI = {
+  getDomain: () => api.get('/deep-dive/domain/'),
   start: (domain) => api.post(`/deep-dive/${domain}/start/`),
   sendMessage: (domain, data) => api.post(`/deep-dive/${domain}/message/`, data),
   skip: (domain) => api.post(`/deep-dive/${domain}/skip/`),

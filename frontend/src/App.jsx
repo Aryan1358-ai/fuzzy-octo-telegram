@@ -83,6 +83,7 @@ function AnimatedRoutes() {
         <Route path="/activity/:activityNumber" element={<ProtectedRoute><Layout><ActivityRouter /></Layout></ProtectedRoute>} />
         <Route path="/thinking-styles" element={<ProtectedRoute><Layout><ThinkingStyles /></Layout></ProtectedRoute>} />
         <Route path="/results" element={<ProtectedRoute><Layout><Results /></Layout></ProtectedRoute>} />
+        <Route path="/deep-dive" element={<ProtectedRoute><Layout><DeepDive /></Layout></ProtectedRoute>} />
         <Route path="/deep-dive/:domain" element={<ProtectedRoute><Layout><DeepDive /></Layout></ProtectedRoute>} />
         <Route path="/roadmap/:domain" element={<ProtectedRoute><Layout><Roadmap /></Layout></ProtectedRoute>} />
 

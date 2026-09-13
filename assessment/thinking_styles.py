@@ -26,9 +26,13 @@ def calculate_style_scores(domain_scores_dict):
 
     for style_key, style_info in THINKING_STYLE_DOMAINS.items():
         primary = style_info['primary_domains']
+        weights = style_info.get('weights', [0.5] * len(primary))
 
-        # Confidence = weighted average of primary domain percentages
-        primary_total = sum(domain_scores_dict.get(d, 0) for d in primary)
+        # Confidence = weighted sum of primary domain scores / total
+        primary_total = sum(
+            domain_scores_dict.get(d, 0) * w
+            for d, w in zip(primary, weights)
+        )
         confidence = primary_total / total
 
         # Bonus for having both primary domains strong (not just one)
