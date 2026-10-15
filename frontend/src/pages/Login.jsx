@@ -1,9 +1,10 @@
 /**
- * Login Page — wired to Django auth backend.
+ * Login Page — supports email/password and Google OAuth.
  */
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
+import { GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
@@ -12,7 +13,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -26,6 +27,23 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setLoading(true);
+    setError('');
+    try {
+      await googleLogin(credentialResponse.credential);
+      navigate('/context');
+    } catch (err) {
+      setError(err.message || 'Google login failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleError = () => {
+    setError('Google sign-in was cancelled or failed. Please try again.');
   };
 
   return (
@@ -56,6 +74,41 @@ export default function Login() {
             {error}
           </div>
         )}
+
+        {/* Google Sign-In Button */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          marginBottom: 'var(--space-6)',
+        }}>
+          <GoogleLogin
+            onSuccess={handleGoogleSuccess}
+            onError={handleGoogleError}
+            theme="filled_black"
+            size="large"
+            width="400"
+            text="signin_with"
+            shape="pill"
+          />
+        </div>
+
+        {/* Divider */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-4)',
+          marginBottom: 'var(--space-6)',
+        }}>
+          <div style={{ flex: 1, height: '1px', background: 'var(--color-border)' }} />
+          <span style={{
+            fontSize: 'var(--font-size-xs)',
+            color: 'var(--color-text-muted)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            fontWeight: 500,
+          }}>or continue with email</span>
+          <div style={{ flex: 1, height: '1px', background: 'var(--color-border)' }} />
+        </div>
 
         <form onSubmit={handleLogin} className="flex flex-col gap-6">
           <div className="flex flex-col gap-2">

@@ -8,14 +8,22 @@ Endpoints:
   GET  /api/auth/me/        — return current user info (or 401)
 """
 
+import logging
+
+from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.db import IntegrityError
+
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
@@ -105,6 +113,81 @@ def me(request):
     """Return the currently authenticated user's info."""
     return Response({
         'user': _user_to_dict(request.user),
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def google_login(request):
+    """Authenticate via Google OAuth.
+
+    Expects: { "credential": "<Google ID token>" }
+    The token is verified server-side against Google's certificates.
+    A Django user is created (or matched) by email, then logged in.
+    """
+    credential = request.data.get('credential', '')
+    if not credential:
+        return Response(
+            {'error': 'Google credential token is required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', '')
+    if not client_id:
+        logger.error('GOOGLE_OAUTH_CLIENT_ID not configured in settings.')
+        return Response(
+            {'error': 'Google OAuth is not configured on this server.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    # Verify the token with Google
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            client_id,
+        )
+    except ValueError as e:
+        logger.warning(f'Google token verification failed: {e}')
+        return Response(
+            {'error': 'Invalid Google credential. Please try again.'},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    # Extract user info from verified token
+    google_email = idinfo.get('email', '').lower()
+    google_name = idinfo.get('name', '')
+    email_verified = idinfo.get('email_verified', False)
+
+    if not google_email or not email_verified:
+        return Response(
+            {'error': 'Google account email is not verified.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Find or create user by email
+    try:
+        user = User.objects.get(email=google_email)
+        # Update name if it was blank (user originally registered with email/password)
+        if not user.first_name and google_name:
+            user.first_name = google_name
+            user.save(update_fields=['first_name'])
+    except User.DoesNotExist:
+        # Auto-create account for Google users (no password needed)
+        user = User.objects.create_user(
+            username=google_email,
+            email=google_email,
+            first_name=google_name,
+        )
+        # Set unusable password — they'll always sign in via Google
+        user.set_unusable_password()
+        user.save()
+
+    login(request, user)
+
+    return Response({
+        'message': 'Google login successful.',
+        'user': _user_to_dict(user),
     })
 
 

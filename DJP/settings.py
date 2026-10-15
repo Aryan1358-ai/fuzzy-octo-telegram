@@ -150,3 +150,6 @@ CSRF_COOKIE_SECURE = not DEBUG
 # Google Gemini API (Conversational Deep-Dive)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')
+
+# Google OAuth
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')

@@ -3,6 +3,7 @@
  */
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AssessmentProvider } from './context/AssessmentContext';
 import Layout from './components/Layout';
@@ -16,6 +17,8 @@ import Roadmap from './pages/Roadmap';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Analytics from './pages/Analytics';
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 /**
  * Redirect to /login if not authenticated.
@@ -96,13 +99,15 @@ function AnimatedRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AssessmentProvider>
-          <div className="bg-mesh" />
-          <AnimatedRoutes />
-        </AssessmentProvider>
-      </AuthProvider>
-    </BrowserRouter>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <BrowserRouter>
+        <AuthProvider>
+          <AssessmentProvider>
+            <div className="bg-mesh" />
+            <AnimatedRoutes />
+          </AssessmentProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </GoogleOAuthProvider>
   );
 }

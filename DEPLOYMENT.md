@@ -23,18 +23,103 @@ MAKE-YOUR-MOVE-/
 │   └── wsgi.py
 ├── assessment/           # Django app (all API logic)
 │   ├── views.py          # Main assessment endpoints
-│   ├── auth_views.py     # Auth (register/login/logout)
+│   ├── auth_views.py     # Auth (register/login/logout + Google OAuth)
 │   ├── analytics_views.py # Admin analytics dashboard
 │   ├── deep_dive.py      # Gemini AI chat logic
 │   ├── models.py         # DB models
 │   └── urls.py           # API routes
 ├── frontend/             # React app (Vite)
 │   ├── src/
+│   ├── .env.example      # ⚠️ Copy to .env and fill in values
 │   ├── package.json
 │   └── vite.config.js
 ├── manage.py
+├── .env.example          # ⚠️ Copy to .env and fill in values
 └── .env                  # ⚠️ NOT in repo — must create manually
 ```
+
+---
+
+## 🔐 Step 0: Set Up Google OAuth (Required for "Sign in with Google")
+
+> [!IMPORTANT]
+> The `.env` files are **not** included in the repo (they're in `.gitignore`). Every person who clones this repo must create their own Google OAuth credentials and `.env` files for OAuth to work.
+
+### 0a. Create a Google Cloud Project
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Click the project dropdown (top-left) → **New Project**
+3. Name it (e.g. `MakeYourMove`) → **Create**
+4. Make sure the new project is selected
+
+### 0b. Configure the OAuth Consent Screen
+
+1. In the left sidebar: **APIs & Services → OAuth consent screen**
+2. Click **Get Started** or **Configure Consent Screen**
+3. Fill in:
+   - **App name:** `Make Your Move`
+   - **User support email:** your email
+   - **Developer contact email:** your email
+4. **Audience:** Choose **External** (anyone with a Google account can sign in)
+5. Click through the remaining steps (scopes — no changes needed, just continue)
+6. Under **Test Users** → **Add Users** → add your own Gmail address
+   > While the app is in "Testing" mode, only added test users can sign in. Publish to "Production" to allow anyone.
+7. Save
+
+### 0c. Create OAuth Client ID (Credentials)
+
+1. Go to **APIs & Services → Credentials**
+2. Click **+ CREATE CREDENTIALS → OAuth client ID**
+3. **Application type:** Web application
+4. **Name:** `MakeYourMove Web`
+5. **Authorized JavaScript origins:**
+
+   | Environment | Origin |
+   |-------------|--------|
+   | Local dev | `http://localhost:5173` |
+   | Production (Vercel) | `https://your-app.vercel.app` |
+
+6. **Authorized redirect URIs:**
+
+   | Environment | URI |
+   |-------------|-----|
+   | Local dev | `http://localhost:5173` |
+   | Production (Vercel) | `https://your-app.vercel.app` |
+
+7. Click **Create**
+8. **Copy the Client ID** — it looks like:
+   ```
+   123456789-xxxxxxxxxxxxxxx.apps.googleusercontent.com
+   ```
+
+### 0d. Add the Client ID to Your `.env` Files
+
+**Root `.env`** (for Django backend):
+```bash
+cp .env.example .env
+# Then edit .env and set:
+GOOGLE_OAUTH_CLIENT_ID=your-client-id-here.apps.googleusercontent.com
+```
+
+**Frontend `.env`** (for React):
+```bash
+cp frontend/.env.example frontend/.env
+# Then edit frontend/.env and set:
+VITE_GOOGLE_CLIENT_ID=your-client-id-here.apps.googleusercontent.com
+```
+
+> [!NOTE]
+> Both files use the **same Client ID** — the frontend sends it to Google to get a token, and the backend uses it to verify that token is genuine.
+
+### 0e. Install the Backend Dependency
+
+The backend needs the `google-auth` library to verify tokens:
+```bash
+pip install google-auth
+```
+
+> [!TIP]
+> If `google-auth` is already installed (it comes bundled with `google-genai`), you can skip this step.
 
 ---
 
@@ -72,6 +157,7 @@ django-cors-headers==4.9.0
 psycopg[binary]==3.3.3
 python-dotenv==1.2.2
 google-genai==2.11.0
+google-auth==2.40.1
 gunicorn==23.0.0
 whitenoise==6.9.0
 ```
@@ -158,6 +244,9 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # ── Gemini API ────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_MODEL = 'gemini-2.0-flash'
+
+# ── Google OAuth ──────────────────────────────────────
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
 ```
 
 ### 2c. Deploy on Render
@@ -181,7 +270,8 @@ GEMINI_MODEL = 'gemini-2.0-flash'
 | `DB_PASSWORD` | *(from Step 1)* |
 | `DB_HOST` | *(from Step 1)* |
 | `DB_PORT` | `5432` |
-| `GEMINI_API_KEY` | *(ask Aryan for the key)* |
+| `GEMINI_API_KEY` | *(your Gemini API key)* |
+| `GOOGLE_OAUTH_CLIENT_ID` | *(from Step 0c)* |
 | `FRONTEND_URL` | *(your Vercel URL, e.g. `https://make-your-move.vercel.app`)* |
 | `ALLOWED_HOSTS` | `makeyourmove-api.onrender.com` |
 
@@ -222,11 +312,12 @@ This lets you set the backend URL via Vercel environment variables.
 4. **Root Directory:** `frontend`
 5. **Build Command:** `npm run build`
 6. **Output Directory:** `dist`
-7. Add **Environment Variable**:
+7. Add **Environment Variables**:
 
 | Key | Value |
 |-----|-------|
 | `VITE_API_URL` | `https://makeyourmove-api.onrender.com/api` *(your Render URL + /api)* |
+| `VITE_GOOGLE_CLIENT_ID` | *(same Client ID from Step 0c)* |
 
 8. Deploy!
 
@@ -244,6 +335,16 @@ Create `frontend/vercel.json` to handle React Router:
 
 Without this, refreshing on `/login` or `/results` will show a 404.
 
+### 3d. Update Google OAuth Origins for Production
+
+After you get your Vercel URL, go back to [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) and add:
+
+- **Authorized JavaScript origins:** `https://your-app.vercel.app`
+- **Authorized redirect URIs:** `https://your-app.vercel.app`
+
+> [!WARNING]
+> If you skip this step, Google OAuth will work locally but fail in production with an "origin mismatch" error.
+
 ---
 
 ## 🔗 Step 4: Connect Frontend ↔ Backend
@@ -260,24 +361,64 @@ After both are deployed:
 
 ## 🔑 Environment Variables Summary
 
-### Backend (Render)
-| Variable | Example |
-|----------|---------|
-| `DJANGO_SECRET_KEY` | `your-random-50-char-string` |
-| `DEBUG` | `False` |
-| `DB_NAME` | `makeyourmove_db` |
-| `DB_USER` | `makeyourmove_user` |
-| `DB_PASSWORD` | `super-secret-password` |
-| `DB_HOST` | `dpg-xxx.oregon-postgres.render.com` |
-| `DB_PORT` | `5432` |
-| `GEMINI_API_KEY` | `AQ.Ab8RN...` |
-| `FRONTEND_URL` | `https://make-your-move.vercel.app` |
-| `ALLOWED_HOSTS` | `makeyourmove-api.onrender.com` |
+### Backend (Render / `.env`)
+| Variable | Example | Required |
+|----------|---------|----------|
+| `DJANGO_SECRET_KEY` | `your-random-50-char-string` | ✅ |
+| `DEBUG` | `False` | ✅ |
+| `DB_NAME` | `makeyourmove_db` | ✅ |
+| `DB_USER` | `makeyourmove_user` | ✅ |
+| `DB_PASSWORD` | `super-secret-password` | ✅ |
+| `DB_HOST` | `dpg-xxx.oregon-postgres.render.com` | ✅ |
+| `DB_PORT` | `5432` | ✅ |
+| `GEMINI_API_KEY` | `AQ.Ab8RN...` | ✅ |
+| `GOOGLE_OAUTH_CLIENT_ID` | `578235...apps.googleusercontent.com` | ✅ for Google login |
+| `FRONTEND_URL` | `https://make-your-move.vercel.app` | ✅ |
+| `ALLOWED_HOSTS` | `makeyourmove-api.onrender.com` | ✅ |
 
-### Frontend (Vercel)
-| Variable | Example |
-|----------|---------|
-| `VITE_API_URL` | `https://makeyourmove-api.onrender.com/api` |
+### Frontend (Vercel / `frontend/.env`)
+| Variable | Example | Required |
+|----------|---------|----------|
+| `VITE_API_URL` | `https://makeyourmove-api.onrender.com/api` | ✅ in production |
+| `VITE_GOOGLE_CLIENT_ID` | `578235...apps.googleusercontent.com` | ✅ for Google login |
+
+---
+
+## ⚡ Quick Start (Local Development)
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/Aryan1358-ai/MAKE-YOUR-MOVE-.git
+cd MAKE-YOUR-MOVE-
+
+# 2. Set up backend
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Mac/Linux
+pip install -r requirements.txt
+
+# 3. Create backend .env
+cp .env.example .env
+# Edit .env → fill in GEMINI_API_KEY, GOOGLE_OAUTH_CLIENT_ID, DB credentials
+
+# 4. Set up database
+python manage.py migrate
+python manage.py createsuperuser
+
+# 5. Start backend
+python manage.py runserver
+
+# 6. Set up frontend (new terminal)
+cd frontend
+npm install
+
+# 7. Create frontend .env
+cp .env.example .env
+# Edit .env → fill in VITE_GOOGLE_CLIENT_ID (same value as backend)
+
+# 8. Start frontend
+npm run dev
+```
 
 ---
 
@@ -288,6 +429,8 @@ After both are deployed:
 - [ ] Frontend can reach backend (test signup/login)
 - [ ] CORS is working (no console errors about blocked requests)
 - [ ] Session cookies are being set (check browser DevTools → Application → Cookies)
+- [ ] Google OAuth works (test "Sign in with Google" button)
+- [ ] Google OAuth origins updated for production URL
 - [ ] Gemini deep-dive chat works (requires valid API key)
 - [ ] Analytics page loads for admin users at `/analytics`
 
@@ -297,6 +440,11 @@ After both are deployed:
 
 | Problem | Fix |
 |---------|-----|
+| **"Missing required parameter: client_id"** (Google OAuth) | `VITE_GOOGLE_CLIENT_ID` is missing or empty in `frontend/.env`. Create the file and add your Client ID |
+| **"Google OAuth is not configured on this server"** | `GOOGLE_OAUTH_CLIENT_ID` is missing in the backend `.env` |
+| **"origin_mismatch" from Google** | Your site URL isn't in the OAuth credential's Authorized JavaScript Origins. Add it in Google Cloud Console |
+| **Google login works locally but not in production** | Add your production URL (Vercel) to both "Authorized JavaScript origins" and "Authorized redirect URIs" in Google Cloud Console |
+| **OAuth consent screen says "unverified app"** | Normal for apps in Testing mode. Click "Continue" to proceed, or publish the app for production |
 | CORS errors in browser console | Make sure `FRONTEND_URL` on Render matches your exact Vercel URL (no trailing slash) |
 | 401 on every API call | Session cookies not being sent — check `SESSION_COOKIE_SAMESITE = 'None'` and `SESSION_COOKIE_SECURE = True` |
 | Login works but session lost on refresh | Cookie domain mismatch — ensure `withCredentials: true` in axios and CORS is configured |
@@ -314,6 +462,7 @@ All endpoints are prefixed with `/api/`:
 |----------|--------|------|---------|
 | `/api/auth/register/` | POST | No | Create account |
 | `/api/auth/login/` | POST | No | Login |
+| `/api/auth/google/` | POST | No | Google OAuth login |
 | `/api/auth/logout/` | POST | Yes | Logout |
 | `/api/auth/me/` | GET | Yes | Current user info |
 | `/api/session/start/` | POST | Yes | Start assessment |
@@ -330,4 +479,4 @@ All endpoints are prefixed with `/api/`:
 
 ---
 
-*Last updated: August 2, 2026*
+*Last updated: October 15, 2026*

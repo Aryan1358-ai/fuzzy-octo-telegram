@@ -11,6 +11,7 @@ urlpatterns = [
     # Authentication
     path('auth/register/', auth_views.register, name='register'),
     path('auth/login/', auth_views.login_view, name='login'),
+    path('auth/google/', auth_views.google_login, name='google-login'),
     path('auth/logout/', auth_views.logout_view, name='logout'),
     path('auth/me/', auth_views.me, name='me'),
 

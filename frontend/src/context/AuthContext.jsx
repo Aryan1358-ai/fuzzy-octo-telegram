@@ -60,6 +60,22 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const googleLogin = useCallback(async (credential) => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const res = await authAPI.googleLogin(credential);
+      setUser(res.data.user);
+      return res.data;
+    } catch (err) {
+      const message = err.response?.data?.error || 'Google login failed. Please try again.';
+      setAuthError(message);
+      throw new Error(message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await authAPI.logout();
@@ -79,6 +95,7 @@ export function AuthProvider({ children }) {
     isAdmin: user?.is_staff || false,
     login,
     register,
+    googleLogin,
     logout,
     clearError,
   };
