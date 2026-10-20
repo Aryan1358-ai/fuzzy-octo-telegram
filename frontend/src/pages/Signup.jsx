@@ -1,5 +1,5 @@
 /**
- * Signup Page — supports email/password and Google OAuth.
+ * Signup Page — Google OAuth only (auto-creates account).
  */
 import { useState } from 'react';
 import { motion } from 'framer-motion';
@@ -8,27 +8,10 @@ import { GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext';
 
 export default function Signup() {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
-  const { register, googleLogin } = useAuth();
-
-  const handleSignup = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    try {
-      await register(name, email, password);
-      navigate('/context');
-    } catch (err) {
-      setError(err.message || 'Registration failed. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { googleLogin } = useAuth();
 
   const handleGoogleSuccess = async (credentialResponse) => {
     setLoading(true);
@@ -80,7 +63,7 @@ export default function Signup() {
         <div style={{
           display: 'flex',
           justifyContent: 'center',
-          marginBottom: 'var(--space-6)',
+          marginBottom: 'var(--space-4)',
         }}>
           <GoogleLogin
             onSuccess={handleGoogleSuccess}
@@ -93,115 +76,14 @@ export default function Signup() {
           />
         </div>
 
-        {/* Divider */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-4)',
-          marginBottom: 'var(--space-6)',
-        }}>
-          <div style={{ flex: 1, height: '1px', background: 'var(--color-border)' }} />
-          <span style={{
-            fontSize: 'var(--font-size-xs)',
+        {loading && (
+          <p className="text-center" style={{
+            fontSize: 'var(--font-size-sm)',
             color: 'var(--color-text-muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            fontWeight: 500,
-          }}>or sign up with email</span>
-          <div style={{ flex: 1, height: '1px', background: 'var(--color-border)' }} />
-        </div>
-
-        <form onSubmit={handleSignup} className="flex flex-col gap-6">
-          <div className="flex flex-col gap-2">
-            <label htmlFor="name" style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>
-              Full Name
-            </label>
-            <input
-              id="name"
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Jane Doe"
-              style={{
-                width: '100%',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(0,0,0,0.2)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                color: 'white',
-                outline: 'none',
-              }}
-              onFocus={(e) => (e.target.style.borderColor = 'var(--color-accent-2)')}
-              onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label htmlFor="email" style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>
-              Email Address
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              style={{
-                width: '100%',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(0,0,0,0.2)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                color: 'white',
-                outline: 'none',
-              }}
-              onFocus={(e) => (e.target.style.borderColor = 'var(--color-accent-2)')}
-              onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label htmlFor="password" style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              minLength={6}
-              style={{
-                width: '100%',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(0,0,0,0.2)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                color: 'white',
-                outline: 'none',
-              }}
-              onFocus={(e) => (e.target.style.borderColor = 'var(--color-accent-2)')}
-              onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
-            />
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-              At least 6 characters
-            </span>
-          </div>
-
-          <motion.button
-            type="submit"
-            className="btn btn-primary"
-            style={{ width: '100%', padding: 'var(--space-4)', marginTop: 'var(--space-2)' }}
-            disabled={loading}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            {loading ? 'Creating Account...' : 'Sign Up'}
-          </motion.button>
-        </form>
+          }}>
+            Creating your account...
+          </p>
+        )}
 
         <div className="text-center mt-8" style={{ fontSize: 'var(--font-size-sm)' }}>
           <span style={{ color: 'var(--color-text-muted)' }}>Already have an account? </span>
@@ -211,3 +93,4 @@ export default function Signup() {
     </motion.div>
   );
 }
+
